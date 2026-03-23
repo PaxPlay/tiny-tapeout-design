@@ -16,16 +16,27 @@ module synth (
 reg [1:0] sample_div;
 wire sample_tick = &sample_div;
 
-// ── Triangle oscillator ─────────────────────────────────────────────────────
+// ── Oscillators ─────────────────────────────────────────────────────────────
 reg [15:0] phase;
 reg [15:0] phase_inc;
 
-// Fold phase at midpoint to get triangle: 0→32767→0, then take top 11 bits
-wire [10:0] tri_wave = 11'((phase[15] ? ~phase : phase) >> 4);
-// Square wave at 4× the fundamental: phase[13] toggles 4× per cycle
-wire [10:0] sq_wave = {3'b000, {8{phase[13]}}};
-// Mix: sum ranges [0..4094], centred near 2047 — no bias needed
-assign audio_sample = {1'b0, tri_wave} + {1'b0, sq_wave};
+// LFO: ~5 Hz triangle at 50 kHz (increment = round(5/50000*65536) = 7)
+reg [15:0] lfo_phase;
+wire [15:0] lfo_tri = lfo_phase[15] ? ~lfo_phase : lfo_phase; // [0..32767]
+// Map to signed ±8 offset: (lfo_tri − 16384) >> 11  →  [−8..7]
+wire signed [15:0] lfo_offset = ($signed(lfo_tri) - 16'sd16384) >>> 11;
+// Second phase accumulator detuned by the LFO
+reg [15:0] phase2;
+wire [15:0] phase2_inc = 16'($signed(phase_inc) + lfo_offset);
+
+// Fold each phase to a triangle, take top 11 bits
+wire [10:0] tri_wave  = 11'((phase[15]  ? ~phase  : phase)  >> 4);
+wire [10:0] tri_wave2 = 11'((phase2[15] ? ~phase2 : phase2) >> 4);
+// Square wave at 4× the fundamental from the primary oscillator
+wire [10:0] sq_wave = {4'b0000, {7{phase[13]}}};
+// Mix all three; sum fits in 13 bits (max 4349), shift right 1 → 12-bit output
+wire [12:0] raw_mix = {2'b0, tri_wave} + {2'b0, tri_wave2} + {2'b0, sq_wave};
+assign audio_sample = raw_mix[12:1];
 
 // ── Sigma-delta modulator (runs at full 200 kHz) ────────────────────────────
 reg [11:0] sd_accum;
@@ -75,6 +86,8 @@ always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         sample_div <= 2'b0;
         phase      <= 16'b0;
+        phase2     <= 16'b0;
+        lfo_phase  <= 16'b0;
         sd_accum   <= 12'b0;
         audio_out  <= 1'b0;
     end else begin
@@ -82,8 +95,12 @@ always @(posedge clk or negedge rst_n) begin
         audio_out <= sd_next[12];
 
         sample_div <= sample_div + 1;
-        if (sample_tick)
-            phase <= phase + phase_inc;
+        if (sample_tick) begin
+            phase     <= phase     + phase_inc;
+            phase2    <= phase2    + phase2_inc;
+            lfo_phase <= lfo_phase + 16'd5;
+        end
+
     end
 end
 
