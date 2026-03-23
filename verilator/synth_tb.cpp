@@ -4,15 +4,8 @@
 #include "verilated.h"
 #include <SDL2/SDL.h>
 
-// Input values for C major scale, two octaves.
-// Hardware maps input 0→MIDI 36, so: input = MIDI_note - 36.
-// C4=60→24, D4=62→26, E4=64→28, F4=65→29, G4=67→31, A4=69→33, B4=71→35,
-// C5=72→36, D5=74→38, E5=76→40, F5=77→41, G5=79→43, A5=81→45, C6=84→48
-static const uint8_t DEMO_NOTES[] = {
-    24, 26, 28, 29, 31, 33, 35, 36,
-    38, 40, 41, 43, 45, 48,
-};
-static const int N_NOTES = sizeof(DEMO_NOTES) / sizeof(DEMO_NOTES[0]);
+// All 64 note indices chromatically (input 0-63 → MIDI 36-99).
+static const int N_NOTES = 64;
 
 // Simulate at 200 kHz; SDL audio at 50 kHz.
 // We advance 4 clock cycles per audio sample (200kHz/4 = 50kHz).
@@ -49,12 +42,12 @@ static void sdl_audio_callback(void* /*userdata*/, uint8_t* stream, int len) {
 
         if (sample_count >= note_change_at) {
             note_idx = (note_idx + 1) % N_NOTES;
-            top->midi_note = DEMO_NOTES[note_idx];
+            top->midi_note = note_idx;
             top->gate = 1;
             gate_on = true;
             note_change_at = sample_count + note_period_samples;
             release_at     = sample_count + release_offset;
-            fprintf(stderr, "\rnote=%3d  sample=%lu\e[K", DEMO_NOTES[note_idx], sample_count);
+            fprintf(stderr, "\rnote=%3d (MIDI %3d)  sample=%lu\e[K", note_idx, note_idx + 36, sample_count);
             fflush(stderr);
         }
         if (gate_on && sample_count >= release_at) {
