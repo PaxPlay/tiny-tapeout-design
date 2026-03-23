@@ -22,8 +22,10 @@ reg [15:0] phase_inc;
 
 // Fold phase at midpoint to get triangle: 0→32767→0, then take top 11 bits
 wire [10:0] tri_wave = 11'((phase[15] ? ~phase : phase) >> 4);
-// Map [0..2047] to unsigned [2048..4095] for sigma-delta
-assign audio_sample = {1'b1, tri_wave};
+// Square wave at 4× the fundamental: phase[13] toggles 4× per cycle
+wire [10:0] sq_wave = {3'b000, {8{phase[13]}}};
+// Mix: sum ranges [0..4094], centred near 2047 — no bias needed
+assign audio_sample = {1'b0, tri_wave} + {1'b0, sq_wave};
 
 // ── Sigma-delta modulator (runs at full 200 kHz) ────────────────────────────
 reg [11:0] sd_accum;
