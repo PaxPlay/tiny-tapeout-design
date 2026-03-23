@@ -6,7 +6,6 @@ synth: $(SRC)/synth.v synth_tb.cpp
 	    -I$(SRC) \
 	    $^ \
 	    -CFLAGS "-g -O3" \
-	    --LDFLAGS "-lSDL2" \
 	    --top-module synth
 	$(MAKE) -C obj_dir -f Vsynth.mk
 	cp obj_dir/Vsynth $@

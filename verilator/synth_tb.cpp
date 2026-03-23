@@ -1,100 +1,88 @@
-#include <stdint.h>
-#include <stdio.h>
 #include "Vsynth.h"
 #include "verilated.h"
-#include <SDL2/SDL.h>
+#include <stdint.h>
+#include <stdio.h>
 
 // All 64 note indices chromatically (input 0-63 → MIDI 36-99).
-static const int N_NOTES = 64;
+static const int N_NOTES = 16;
 
-// Simulate at 200 kHz; SDL audio at 50 kHz.
-// We advance 4 clock cycles per audio sample (200kHz/4 = 50kHz).
-#define SAMPLE_RATE     50000
-#define CLKS_PER_SAMPLE 4
+// Clock: 50 MHz. Sample rate: 50 kHz. Clocks per audio sample: 1000.
+#define SAMPLE_RATE 50000
+#define CLKS_PER_SAMPLE 1000
 
-static Vsynth *top;
-static int note_idx = 0;
-static uint64_t note_change_at = 0;
-static uint64_t sample_count = 0;
+// Output: 16-bit unsigned PCM, mono, 50 kHz.
+// Play back with e.g.:
+//   ffplay -f u16le -ar 50000 -ac 1 audio.raw
+//   aplay  -f U16_LE -r 50000 -c 1 audio.raw
+#define OUTPUT_FILE "audio.raw"
 
-static void advance_clocks(int n) {
-    for (int i = 0; i < n; i++) {
-        top->clk = 0; top->eval();
-        top->clk = 1; top->eval();
+int main(int argc, char **argv) {
+  Verilated::commandArgs(argc, argv);
+  Vsynth *top = new Vsynth;
+
+  FILE *fp = fopen(OUTPUT_FILE, "wb");
+  if (!fp) {
+    perror("fopen");
+    return 1;
+  }
+
+  // Reset
+  top->rst_n = 0;
+  top->gate = 0;
+  top->midi_note = 0;
+  top->clk = 0;
+  top->eval();
+  top->clk = 1;
+  top->eval();
+  top->rst_n = 1;
+
+  // One full chromatic sweep: 64 notes × 0.5 s = 32 s of audio
+  const uint64_t gate_samples = SAMPLE_RATE * 3 / 10;   // 0.3 s gate on
+  const uint64_t period_samples = SAMPLE_RATE * 5 / 10; // 0.5 s per note
+  const uint64_t total_samples = (uint64_t)N_NOTES * period_samples;
+
+  int note_idx = -1;
+  uint64_t release_at = 0;
+  uint64_t next_note = 0;
+  bool gate_on = false;
+
+  for (uint64_t s = 0; s < total_samples; s++) {
+    // Note scheduling
+    if (s >= next_note) {
+      note_idx = (note_idx + 1) % N_NOTES;
+      next_note = s + period_samples;
+      release_at = s + gate_samples;
+      top->midi_note = (uint8_t)note_idx + 12;
+      top->gate = 1;
+      gate_on = true;
+      fprintf(stderr, "\rnote %3d / %3d  (MIDI %3d)\e[K", note_idx + 1, N_NOTES,
+              note_idx + 36);
+      fflush(stderr);
     }
-}
-
-static void sdl_audio_callback(void* /*userdata*/, uint8_t* stream, int len) {
-    uint16_t *out = (uint16_t*) stream;
-    int nsamples = len / 2;
-
-    for (int i = 0; i < nsamples; i++) {
-        uint64_t note_samples  = SAMPLE_RATE * 3 / 10;  // 0.3 s tone
-        uint64_t pause_samples = SAMPLE_RATE * 1 / 10;  // 0.1 s silence
-        uint64_t period        = note_samples + pause_samples;
-
-        if (sample_count >= note_change_at) {
-            note_idx = (note_idx + 1) % N_NOTES;
-            note_change_at = sample_count + period;
-            fprintf(stderr, "\rnote=%3d (MIDI %3d)  sample=%lu\e[K",
-                    note_idx, note_idx + 36, sample_count);
-            fflush(stderr);
-        }
-
-        bool in_pause = (sample_count >= note_change_at - pause_samples) &&
-                        (sample_count <  note_change_at);
-        top->midi_note = (uint8_t) note_idx;
-        advance_clocks(CLKS_PER_SAMPLE);
-        // Output DC midpoint during pause; oscillator keeps running underneath
-        out[i] = in_pause ? 0x8000u : (uint16_t)(top->audio_sample << 4);
-        sample_count++;
-    }
-}
-
-int main(int argc, char** argv) {
-    Verilated::commandArgs(argc, argv);
-    top = new Vsynth;
-
-    // Reset
-    top->rst_n = 0;
-    top->midi_note = 0;
-    top->clk = 0; top->eval();
-    top->clk = 1; top->eval();
-    top->rst_n = 1;
-
-    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
-    if (SDL_Init(SDL_INIT_AUDIO) < 0) {
-        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
-        return 1;
+    if (gate_on && s >= release_at) {
+      top->gate = 0;
+      gate_on = false;
     }
 
-    SDL_AudioSpec desired, obtained;
-    SDL_zero(desired);
-    desired.freq     = SAMPLE_RATE;
-    desired.format   = AUDIO_U16SYS;
-    desired.channels = 1;
-    desired.samples  = 4096;
-    desired.callback = sdl_audio_callback;
-
-    SDL_AudioDeviceID dev = SDL_OpenAudioDevice(NULL, 0, &desired, &obtained, 0);
-    if (!dev) {
-        fprintf(stderr, "SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
-        return 1;
+    // Advance one sample period, averaging audio_sample to simulate the
+    // RC filter that the audio pmod applies to the sigma-delta output.
+    uint32_t acc = 0;
+    for (int c = 0; c < CLKS_PER_SAMPLE; c++) {
+      top->clk = 0;
+      top->eval();
+      top->clk = 1;
+      top->eval();
+      acc += top->audio_sample;
     }
+    uint16_t sample = (uint16_t)((acc / CLKS_PER_SAMPLE) << 4);
+    fwrite(&sample, sizeof(uint16_t), 1, fp);
+  }
 
-    fprintf(stderr, "Chromatic sweep MIDI 36-99. Ctrl-C to stop.\n");
-    SDL_PauseAudioDevice(dev, 0);
+  fprintf(stderr, "\nWrote %s  (%llu samples, %.1f s)\n", OUTPUT_FILE,
+          (unsigned long long)total_samples,
+          (double)total_samples / SAMPLE_RATE);
 
-    for (;;) {
-        SDL_Event e;
-        while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT) goto done;
-        }
-        SDL_Delay(100);
-    }
-done:
-    SDL_CloseAudioDevice(dev);
-    SDL_Quit();
-    delete top;
-    return 0;
+  fclose(fp);
+  delete top;
+  return 0;
 }
