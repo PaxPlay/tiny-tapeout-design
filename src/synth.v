@@ -1,19 +1,14 @@
 `default_nettype none
 
-// Triangle oscillator with exponential release envelope.
-// Accepts MIDI note number; gate high = note on, gate low = exponential decay.
-// Outputs 1-bit sigma-delta PWM and 16-bit audio sample for simulation.
-//
+// Triangle oscillator, full amplitude output.
 // Clock: 200 kHz  (info.yaml: clock_hz: 200000)
 // Sample rate: clk/4 = 50 kHz
 // Phase accumulator: 16-bit
-// Envelope decay: env -= env >> 13  (τ ≈ 164 ms at 50 kHz)
 module synth (
     input  wire        clk,
     input  wire        rst_n,
     input  wire  [5:0] midi_note,    // note index 0-63 → MIDI 36-99 (C2-Eb7)
-    input  wire        gate,         // 1 = note on, 0 = release
-    output wire [15:0] audio_sample, // unsigned 16-bit for simulation
+    output wire [11:0] audio_sample, // unsigned 12-bit for simulation
     output reg         audio_out     // 1-bit sigma-delta PWM
 );
 
@@ -25,23 +20,14 @@ wire sample_tick = &sample_div;
 reg [15:0] phase;
 reg [15:0] phase_inc;
 
-// Fold phase at midpoint to get triangle: 0→32767→0
-wire [15:0] tri_wave = phase[15] ? ~phase : phase;
-
-// ── Exponential envelope ────────────────────────────────────────────────────
-reg [15:0] env;
-reg gate_prev;
-
-// ── Mix: scale triangle by envelope ────────────────────────────────────────
-// tri_wave ∈ [0, 32767], env ∈ [0, 65535]
-// product [31:0]; take [30:15] for 16-bit result
-wire [31:0] tri_env = tri_wave * env;
-// Convert signed [-32768..32767] → unsigned [0..65535] for sigma-delta
-assign audio_sample = tri_env[30:15] ^ 16'h8000;
+// Fold phase at midpoint to get triangle: 0→32767→0, then take top 11 bits
+wire [10:0] tri_wave = 11'((phase[15] ? ~phase : phase) >> 4);
+// Map [0..2047] to unsigned [2048..4095] for sigma-delta
+assign audio_sample = {1'b1, tri_wave};
 
 // ── Sigma-delta modulator (runs at full 200 kHz) ────────────────────────────
-reg [15:0] sd_accum;
-wire [16:0] sd_next = sd_accum + audio_sample;
+reg [11:0] sd_accum;
+wire [12:0] sd_next = sd_accum + audio_sample;
 
 // ── Note frequency: 12-entry semitone table + octave shift ──────────────────
 // phase_inc = base_inc[note % 12] << (note / 12)
@@ -87,29 +73,15 @@ always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         sample_div <= 2'b0;
         phase      <= 16'b0;
-        env        <= 16'b0;
-        gate_prev  <= 1'b0;
-        sd_accum   <= 16'b0;
+        sd_accum   <= 12'b0;
         audio_out  <= 1'b0;
     end else begin
-        // Sigma-delta runs every clock
-        sd_accum  <= sd_next[15:0];
-        audio_out <= sd_next[16];
+        sd_accum  <= sd_next[11:0];
+        audio_out <= sd_next[12];
 
-        // Sample-rate logic at 50 kHz
         sample_div <= sample_div + 1;
-        if (sample_tick) begin
-            phase     <= phase + phase_inc;
-            gate_prev <= gate;
-
-            if (gate) begin
-                // Note on: hold envelope at maximum
-                env <= 16'hFFFF;
-            end else begin
-                // Note off: exponential decay (τ ≈ 2^13 / 50000 ≈ 164 ms)
-                env <= env - (env >> 13);
-            end
-        end
+        if (sample_tick)
+            phase <= phase + phase_inc;
     end
 end
 
