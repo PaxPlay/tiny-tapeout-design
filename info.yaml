@@ -30,8 +30,8 @@ pinout:
   ui[3]: "MIDI note bit 3"
   ui[4]: "MIDI note bit 4"
   ui[5]: "MIDI note bit 5"
-  ui[6]: "Gate (note on)"
-  ui[7]: ""
+  ui[6]: "MIDI note bit 6"
+  ui[7]: "Gate (note on)"
 
   # Outputs
   uo[0]: ""

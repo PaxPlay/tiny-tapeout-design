@@ -3,8 +3,9 @@
 #include <stdint.h>
 #include <stdio.h>
 
-// All 64 note indices chromatically (input 0-63 → MIDI 36-99).
-static const int N_NOTES = 16;
+// Chromatic sweep: 64 notes, MIDI 36-99 (C2-Eb7).
+static const int N_NOTES = 13;
+static const int NOTE_START = 50;
 
 // Clock: 50 MHz. Sample rate: 50 kHz. Clocks per audio sample: 1000.
 #define SAMPLE_RATE 50000
@@ -37,8 +38,8 @@ int main(int argc, char **argv) {
   top->rst_n = 1;
 
   // One full chromatic sweep: 64 notes × 0.5 s = 32 s of audio
-  const uint64_t gate_samples = SAMPLE_RATE * 3 / 10;   // 0.3 s gate on
-  const uint64_t period_samples = SAMPLE_RATE * 5 / 10; // 0.5 s per note
+  const uint64_t gate_samples = SAMPLE_RATE * 8 / 10; // 0.3 s gate on
+  const uint64_t period_samples = SAMPLE_RATE;        // 0.5 s per note
   const uint64_t total_samples = (uint64_t)N_NOTES * period_samples;
 
   int note_idx = -1;
@@ -52,11 +53,11 @@ int main(int argc, char **argv) {
       note_idx = (note_idx + 1) % N_NOTES;
       next_note = s + period_samples;
       release_at = s + gate_samples;
-      top->midi_note = (uint8_t)note_idx + 12;
+      top->midi_note = (uint8_t)(note_idx + NOTE_START);
       top->gate = 1;
       gate_on = true;
       fprintf(stderr, "\rnote %3d / %3d  (MIDI %3d)\e[K", note_idx + 1, N_NOTES,
-              note_idx + 36);
+              note_idx + NOTE_START);
       fflush(stderr);
     }
     if (gate_on && s >= release_at) {

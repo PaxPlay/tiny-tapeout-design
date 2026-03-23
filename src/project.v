@@ -6,7 +6,7 @@
 `default_nettype none
 
 module tt_um_krimmel_mini_synth (
-    input  wire [7:0] ui_in,    // [5:0] note index (MIDI 36-99), [6] gate
+    input  wire [7:0] ui_in,    // [6:0] MIDI note 0-127, [7] gate
     output wire [7:0] uo_out,   // [7] = audio PWM (AudioPWM on uo[7])
     input  wire [7:0] uio_in,
     output wire [7:0] uio_out,
@@ -16,8 +16,8 @@ module tt_um_krimmel_mini_synth (
     input  wire       rst_n
 );
 
-    wire [5:0] midi_note = ui_in[5:0];
-    wire       gate      = ui_in[6];
+    wire [6:0] midi_note = ui_in[6:0];
+    wire       gate      = ui_in[7];
     wire audio_pwm;
 
     synth synth_inst (
@@ -33,6 +33,6 @@ module tt_um_krimmel_mini_synth (
     assign uio_out = 8'b0;
     assign uio_oe  = 8'b0;
 
-    wire _unused = &{ena, uio_in, ui_in[7], 1'b0};
+    wire _unused = &{ena, uio_in, 1'b0};
 
 endmodule

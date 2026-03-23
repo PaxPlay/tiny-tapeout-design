@@ -7,8 +7,8 @@ from cocotb.triggers import ClockCycles
 
 
 def make_ui(note, gate):
-    """Pack note index (0-63) and gate bit into ui_in."""
-    return (int(gate) << 6) | (int(note) & 0x3F)
+    """Pack MIDI note (0-127) and gate bit into ui_in."""
+    return (int(gate) << 7) | (int(note) & 0x7F)
 
 
 @cocotb.test()
@@ -32,7 +32,7 @@ async def test_project(dut):
     assert dut.uio_oe.value == 0
 
     # Gate off: sigma-delta still toggles (outputting midpoint)
-    dut.ui_in.value = make_ui(33, False)
+    dut.ui_in.value = make_ui(69, False)   # A4 (MIDI 69), gate off
     await ClockCycles(dut.clk, 500)
     transitions_off = 0
     prev = (int(dut.uo_out.value) >> 7) & 1
@@ -45,9 +45,9 @@ async def test_project(dut):
     dut._log.info(f"PWM transitions (gate off): {transitions_off}")
     assert transitions_off > 0
 
-    # Gate on: ADSR attack begins; after 4 sample_ticks (4000 clocks) vol > 0
+    # Gate on: ADSR attack begins; after a few sample_ticks vol > 0
     # and the PWM pattern should change vs the silent midpoint
-    dut.ui_in.value = make_ui(33, True)   # A4, gate on
+    dut.ui_in.value = make_ui(69, True)   # A4 (MIDI 69), gate on
     await ClockCycles(dut.clk, 5000)      # covers at least one attack_tick
 
     transitions_on = 0
@@ -62,11 +62,11 @@ async def test_project(dut):
     assert transitions_on > 0
 
     # Switch note while gate is held — should retrigger attack
-    dut.ui_in.value = make_ui(24, True)   # C4
+    dut.ui_in.value = make_ui(60, True)   # C4 (MIDI 60)
     await ClockCycles(dut.clk, 1000)
 
     # Release: gate off, ADSR enters release phase
-    dut.ui_in.value = make_ui(24, False)
+    dut.ui_in.value = make_ui(60, False)
     await ClockCycles(dut.clk, 1000)
 
     transitions_rel = 0

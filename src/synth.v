@@ -1,6 +1,6 @@
 `default_nettype none
 
-// Triangle + LFO-detuned triangle + square oscillators with ADSR envelope.
+// Triangle + LFO-detuned triangle + square + LFO-detuned sawtooth oscillators with ADSR envelope.
 // Clock:       50 MHz  (info.yaml: clock_hz: 50000000)
 // Sample rate: 50 MHz / 1000 = 50 kHz
 // Envelope:    pulse-density control — 7-bit chop counter, period 125, at 50 MHz
@@ -8,7 +8,7 @@
 module synth (
     input  wire        clk,
     input  wire        rst_n,
-    input  wire  [5:0] midi_note,    // note index 0-63 → MIDI 36-99 (C2-Eb7)
+    input  wire  [6:0] midi_note,    // MIDI note 0-127
     input  wire        gate,         // 1 = note on
     output wire [11:0] audio_sample, // unsigned 12-bit for simulation
     output reg         audio_out     // 1-bit sigma-delta PWM
@@ -26,14 +26,21 @@ reg [15:0] phase_inc;
 reg [15:0] lfo_phase;
 wire [15:0] lfo_tri = lfo_phase[15] ? ~lfo_phase : lfo_phase;
 wire signed [15:0] lfo_offset = ($signed(lfo_tri) - 16'sd16384) >>> 11;
+
+// Osc 2: triangle at same pitch, +lfo_offset (chorus detune)
 reg [15:0] phase2;
 wire [15:0] phase2_inc = 16'($signed(phase_inc) + lfo_offset);
+
+// Osc 3: sawtooth at 2× pitch, -lfo_offset (counter-detune)
+reg [15:0] phase3;
+wire [15:0] phase3_inc = 16'($signed(phase_inc + phase_inc) - (lfo_offset >>> 2));
 
 wire [10:0] tri_wave  = 11'((phase[15]  ? ~phase  : phase)  >> 4);
 wire [10:0] tri_wave2 = 11'((phase2[15] ? ~phase2 : phase2) >> 4);
 wire [10:0] sq_wave   = {5'b00000, {6{phase[13]}}};
+wire [10:0] saw_wave  = {2'b0, phase3[15:7]};   // sawtooth: raw phase, upper 11 bits
 
-wire [12:0] raw_mix   = {2'b0, tri_wave} + {2'b0, tri_wave2} + {2'b0, sq_wave};
+wire [12:0] raw_mix   = {2'b0, tri_wave} + {2'b0, tri_wave2} + {2'b0, sq_wave} + {2'b0, saw_wave};
 wire [11:0] raw_audio = raw_mix[12:1];
 
 // ── ADSR envelope via pulse density amplitude control ───────────────────────
@@ -53,7 +60,7 @@ localparam ATTACK  = 3'd1;
 localparam DECAY   = 3'd2;
 localparam SUSTAIN = 3'd3;
 localparam RELEASE = 3'd4;
-localparam [7:0] SUSTAIN_LEVEL = 8'd78;
+localparam [7:0] SUSTAIN_LEVEL = 8'd68;
 
 reg [2:0] adsr_state;
 reg [7:0] vol;
@@ -72,17 +79,26 @@ reg [11:0] sd_accum;
 wire [12:0] sd_next = sd_accum + audio_sample;
 
 // ── Note frequency: 12-entry semitone table + octave shift ──────────────────
+// Base increments correspond to C2 (MIDI 36) for high precision.
+// For MIDI >= 36: phase_inc = base_inc << octave  (left shift, above C2)
+// For MIDI <  36: phase_inc = base_inc >> octave  (right shift, below C2)
 reg [7:0] base_inc;
 reg [2:0] octave;
 reg [3:0] semitone;
+reg       below_c2;
 
 always @(*) begin
-    if      (midi_note >= 6'd60) begin octave = 3'd5; semitone = 4'(midi_note - 6'd60); end
-    else if (midi_note >= 6'd48) begin octave = 3'd4; semitone = 4'(midi_note - 6'd48); end
-    else if (midi_note >= 6'd36) begin octave = 3'd3; semitone = 4'(midi_note - 6'd36); end
-    else if (midi_note >= 6'd24) begin octave = 3'd2; semitone = 4'(midi_note - 6'd24); end
-    else if (midi_note >= 6'd12) begin octave = 3'd1; semitone = 4'(midi_note - 6'd12); end
-    else                         begin octave = 3'd0; semitone = 4'(midi_note);          end
+    if      (midi_note >= 7'd120) begin below_c2 = 0; octave = 3'd7; semitone = 4'(midi_note - 7'd120); end
+    else if (midi_note >= 7'd108) begin below_c2 = 0; octave = 3'd6; semitone = 4'(midi_note - 7'd108); end
+    else if (midi_note >= 7'd96)  begin below_c2 = 0; octave = 3'd5; semitone = 4'(midi_note - 7'd96);  end
+    else if (midi_note >= 7'd84)  begin below_c2 = 0; octave = 3'd4; semitone = 4'(midi_note - 7'd84);  end
+    else if (midi_note >= 7'd72)  begin below_c2 = 0; octave = 3'd3; semitone = 4'(midi_note - 7'd72);  end
+    else if (midi_note >= 7'd60)  begin below_c2 = 0; octave = 3'd2; semitone = 4'(midi_note - 7'd60);  end
+    else if (midi_note >= 7'd48)  begin below_c2 = 0; octave = 3'd1; semitone = 4'(midi_note - 7'd48);  end
+    else if (midi_note >= 7'd36)  begin below_c2 = 0; octave = 3'd0; semitone = 4'(midi_note - 7'd36);  end
+    else if (midi_note >= 7'd24)  begin below_c2 = 1; octave = 3'd1; semitone = 4'(midi_note - 7'd24);  end
+    else if (midi_note >= 7'd12)  begin below_c2 = 1; octave = 3'd2; semitone = 4'(midi_note - 7'd12);  end
+    else                          begin below_c2 = 1; octave = 3'd3; semitone = 4'(midi_note);           end
 end
 
 always @(*) begin
@@ -103,13 +119,14 @@ always @(*) begin
     endcase
 end
 
-always @(*) phase_inc = {8'b0, base_inc} << octave;
+always @(*) phase_inc = below_c2 ? ({8'b0, base_inc} >> octave) : ({8'b0, base_inc} << octave);
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         sample_div <= 10'b0;
         phase      <= 16'b0;
         phase2     <= 16'b0;
+        phase3     <= 16'b0;
         lfo_phase  <= 16'b0;
         adsr_state <= IDLE;
         vol        <= 8'b0;
@@ -129,7 +146,8 @@ always @(posedge clk or negedge rst_n) begin
         if (sample_tick) begin
             phase     <= phase     + phase_inc;
             phase2    <= phase2    + phase2_inc;
-            lfo_phase <= lfo_phase + 16'd5;
+            phase3    <= phase3    + phase3_inc;
+            lfo_phase <= lfo_phase + 16'd3;
 
             adsr_ctr  <= adsr_ctr + 1;
             gate_prev <= gate;

@@ -23,9 +23,9 @@ A monophonic synthesizer with three oscillators and an ADSR envelope.
 
 ### Note selection
 
-The 6 input bits (`ui[5:0]`) select one of 64 chromatic notes spanning MIDI 36–99 (C2 to Eb7, roughly 65 Hz–2.5 kHz).
+The 7 input bits (`ui[6:0]`) select any of the 128 standard MIDI notes (MIDI 0–127, C-1 to G9, roughly 8 Hz–12.5 kHz).
 
-Pitch lookup is compressed using the octave-doubling property of equal temperament: only 12 base increments (one octave) are stored. The octave is determined by a comparison chain, and the base increment is left-shifted by the octave number — equivalent to multiplying the frequency by 2 for each higher octave.
+Pitch lookup is compressed using the octave-doubling property of equal temperament: only 12 base increments (one octave, anchored at C2 for precision) are stored. The octave is determined by a comparison chain; for notes at or above C2 the base increment is left-shifted, for notes below C2 it is right-shifted.
 
 ### ADSR envelope
 
@@ -47,12 +47,12 @@ Pitch lookup is compressed using the octave-doubling property of equal temperame
 | Phase accumulator | 16-bit |
 | Audio sample | 12-bit unsigned |
 | Chop counter period | 125 (f_chop = 400 kHz) |
-| Note range | MIDI 36–99 (C2–Eb7) |
-| Note resolution | 1 semitone (64 notes, 6 bits) |
+| Note range | MIDI 0–127 (C-1–G9) |
+| Note resolution | 1 semitone (128 notes, 7 bits) |
 
 ## How to test
 
-Connect the Tiny Tapeout Audio Pmod to the output pin header. Drive `ui[5:0]` with a 6-bit note index (0 = MIDI 36 / C2, 63 = MIDI 99 / Eb7) and set `ui[6]` high to open the gate. The ADSR envelope will attack, decay, and sustain while the gate is held; releasing the gate triggers the release phase.
+Connect the Tiny Tapeout Audio Pmod to the output pin header. Drive `ui[6:0]` with a 7-bit MIDI note number (0 = C-1, 69 = A4, 127 = G9) and set `ui[7]` high to open the gate. The ADSR envelope will attack, decay, and sustain while the gate is held; releasing the gate triggers the release phase.
 
 A Verilator simulation is included under `verilator/`. Build and run it with:
 
@@ -66,7 +66,7 @@ ffplay -f u16le -ar 50000 audio.raw
 ffmpeg -f u16le -ar 50000 -i audio.raw audio.wav
 ```
 
-This renders a chromatic sweep of 16 notes (MIDI 48–63, C3–Eb4), 0.3 s gate-on + 0.2 s release per note, to `audio.raw` as 16-bit unsigned PCM at 50 kHz mono.
+This renders a chromatic sweep of 64 notes (MIDI 36–99, C2–Eb7), 0.8 s gate-on + 0.2 s release per note, to `audio.raw` as 16-bit unsigned PCM at 50 kHz mono.
 
 ## External hardware
 

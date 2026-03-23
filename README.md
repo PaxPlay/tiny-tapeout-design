@@ -8,8 +8,8 @@ A monophonic digital synthesizer for the [Tiny Tapeout](https://tinytapeout.com)
 
 | Pin | Function |
 |-----|----------|
-| `ui[5:0]` | Note index (0–63 → MIDI 36–99, C2–Eb7) |
-| `ui[6]` | Gate (1 = note on) |
+| `ui[6:0]` | MIDI note number (0–127, C-1 to G9) |
+| `ui[7]` | Gate (1 = note on) |
 
 ## Output
 
@@ -20,7 +20,7 @@ A monophonic digital synthesizer for the [Tiny Tapeout](https://tinytapeout.com)
 ## How it works
 
 - **Oscillators**: triangle wave + LFO-detuned triangle (slow chorus) + square wave at 4× frequency
-- **Pitch**: 64 chromatic notes (MIDI 36–99). 12 base increments stored; octave derived by left-shifting.
+- **Pitch**: full 128 MIDI notes (0–127, C-1 to G9). 12 base increments stored anchored at C2; octave derived by left- or right-shifting.
 - **ADSR envelope**: pulse-density amplitude control — a 7-bit counter (period 125) at 50 MHz gates the audio signal. f_chop = 400 kHz, aliasing-free at 50 kHz sample rate.
 - **Sigma-delta**: 12-bit first-order modulator drives the 1-bit output at 50 MHz.
 
@@ -28,7 +28,7 @@ A monophonic digital synthesizer for the [Tiny Tapeout](https://tinytapeout.com)
 |-----------|-------|
 | Clock | 50 MHz |
 | Sample rate | 50 kHz |
-| Note range | MIDI 36–99 (C2–Eb7) |
+| Note range | MIDI 0–127 (C-1–G9) |
 | Attack | ~20 ms |
 | Decay | ~30 ms |
 | Release | ~100 ms |
@@ -44,7 +44,7 @@ make
 ffmpeg -f u16le -ar 50000 -i audio.raw audio.wav
 ```
 
-Renders a 16-note chromatic sweep (MIDI 48–63, C3–Eb4) to `audio.raw`.
+Renders a 64-note chromatic sweep (MIDI 36–99, C2–Eb7) to `audio.raw`.
 
 ## External hardware
 
